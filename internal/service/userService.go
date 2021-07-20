@@ -5,23 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gift-code-Two/internal/globalError"
 	model "gift-code-Two/internal/model"
-	mongoUtil "gift-code-Two/internal/utils"
+	utils "gift-code-Two/internal/utils"
 	"gift-code-Two/response"
 	"github.com/golang/protobuf/proto"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"io/ioutil"
 	"log"
-	"net/http"
-	"net/url"
-	"strconv"
 )
 
 func Login(name string) (user model.FindUser, err error) {
 	var (
-		collection = mongoUtil.GetMgoCol("user", "depot")
+		collection = model.GetMgoCol("user", "depot")
 	)
 	//先判断用户是否存在
 	filter := bson.M{"name": name}
@@ -43,10 +40,10 @@ func Login(name string) (user model.FindUser, err error) {
 	}
 }
 
-func RedeemGift(name string, code string) []byte {
+func RedeemGift(name string, code string) (resByte []byte,resErr globalError.GlobalError){
 	//判断用户是否存在，不存在则新建注册一个用户
 	var (
-		collection = mongoUtil.GetMgoCol("user", "depot")
+		collection = model.GetMgoCol("user", "depot")
 		err        error
 		uid        string
 		res        *mongo.InsertOneResult
@@ -71,11 +68,11 @@ func RedeemGift(name string, code string) []byte {
 		fmt.Println(uid)
 	}
 	//判断礼品码是否可以兑换，需要考核题三的接口支持
-	msg := SendComplexGetRequest(code, name)
+	msg := utils.SendComplexGetRequest(code, name)
 	if msg["message"] == nil {
 		//不可兑换
 		fmt.Println("不可兑换")
-		return nil
+		return nil,globalError.GiftNotConvertible("本礼品码不可以兑换")
 	}
 	detail := msg["message"]["GiftDetail"]
 	m := make(map[string]string)
@@ -83,7 +80,7 @@ func RedeemGift(name string, code string) []byte {
 	if len(m) == 0 {
 		//不可兑换
 		fmt.Println("不可兑换")
-		return nil
+		return nil,globalError.GiftNotConvertible("本礼品码不可以兑换")
 	} else {
 		//可兑换
 		//获取奖品内容
@@ -93,9 +90,9 @@ func RedeemGift(name string, code string) []byte {
 		genera := model.GeneraReward{}
 		genera.Code = int32(200)
 		genera.Msg = "领取成功"
-		genera.Changes = mapToAnther(m)
+		genera.Changes = utils.MapToAnther(m)
 		genera.Balance = result.Depot
-		genera.Counter = depotAdd(genera.Changes, genera.Balance)
+		genera.Counter = utils.DepotAdd(genera.Changes, genera.Balance)
 		//给用户增加奖励，mongodb更新数据
 		collection.UpdateOne(context.TODO(), filter, bson.D{
 			{"$set", bson.D{
@@ -117,40 +114,8 @@ func RedeemGift(name string, code string) []byte {
 		if err != nil {
 			log.Fatal(err)
 		}
-		return bytes
+		return bytes,globalError.GlobalError{}
 	}
 
 }
-func SendComplexGetRequest(gc string, name string) map[string]map[string]interface{} {
-	params := url.Values{"giftCode": {gc}, "uuid": {name}}
-	resp, _ := http.PostForm("http://127.0.0.1:8080/redeemGift", params)
 
-	defer resp.Body.Close()
-	body, _ := ioutil.ReadAll(resp.Body)
-	fmt.Println(string(body))
-	resMap := make(map[string]map[string]interface{})
-	err := json.Unmarshal(body, &resMap)
-	if err != nil {
-
-	}
-	return resMap
-}
-func mapToAnther(params map[string]string) map[uint32]uint64 {
-	res := make(map[uint32]uint64)
-	for k, v := range params {
-		key, err := strconv.Atoi(k)
-		value, err := strconv.Atoi(v)
-		if err != nil {
-		}
-		res[uint32(key)] = uint64(value)
-	}
-	return res
-}
-
-func depotAdd(m1 map[uint32]uint64, m2 map[uint32]uint64) map[uint32]uint64 {
-	sum := make(map[uint32]uint64)
-	for k, _ := range m1 {
-		sum[k] = m1[k] + m2[k]
-	}
-	return sum
-}

@@ -7,7 +7,7 @@ import (
 
 func Route(r *gin.Engine) *gin.Engine {
 	//路由
-	r.GET("/login", ctrl.Login)
-	r.GET("/redeemGift", ctrl.RedeemGift)
+	r.POST("/login", ctrl.Login)
+	r.POST("/redeemGift", ctrl.RedeemGift)
 	return r
 }

@@ -1,15 +1,25 @@
 package main
 
 import (
-	"gift-code-Two/internal/router"
-	"github.com/gin-gonic/gin"
+	"fmt"
+	"gift-code-Two/app/http"
+	"gift-code-Two/internal/globalError"
+	"gift-code-Two/internal/model"
+	"log"
 )
 
 func main() {
-	r := gin.Default()
-	router.Route(r)
-	r.Run(":8000")
+	var err error
 
+	err = model.InitMongoDB()
+	if err != nil {
+		log.Println(globalError.MongoDBError("数据库连接失败！请检查并重试"))
+		return
+	}
+	err = http.InitRun()
+	if err != nil {
+		fmt.Println(err.Error())
+	}
 }
 
 

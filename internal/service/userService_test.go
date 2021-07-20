@@ -25,7 +25,7 @@ func TestLogon(t *testing.T) {
 func TestRedeemGift(t *testing.T) {
 	userName := "smallbai"
 	giftCode := "33N3110J"
-	gift := RedeemGift(userName, giftCode)
+	gift, _ := RedeemGift(userName, giftCode)
 	genera := response.GeneralReward{}
 	proto.Unmarshal(gift, &genera)
 	fmt.Println(gift)
