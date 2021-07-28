@@ -2,47 +2,30 @@ package ctrl
 
 import (
 	"gift-code-Two/internal/globalError"
-	"gift-code-Two/internal/service"
+	"gift-code-Two/internal/handler"
+	"gift-code-Two/internal/verify"
 	"github.com/gin-gonic/gin"
-	"net/http"
 )
 
-func Login(c *gin.Context) {
-	name := c.PostForm("name")
-	if len(name) == 0 {
-		err := globalError.Param("参数为空")
-		c.JSON(err.Status,err)
-		return
-	}
 
-	if res, err := service.Login(name); err == nil {
-		c.JSON(http.StatusOK, gin.H{
-			"message": res,
-		})
-	} else {
-		c.JSON(http.StatusOK, gin.H{
-			"message": err.Error(),
-		})
+func Login(c *gin.Context) (interface{},error) {
+	name := c.PostForm("name")
+	if !verify.ParamIsNotEmpty(name) {
+		return nil, globalError.ParamError("参数为空",globalError.ParamIsEmpty)
 	}
+	 res, err := handler.Login(name)
+	 return res,err
 }
 
-func RedeemGift(c *gin.Context) {
+//RedeemGift 兑换礼品，返回礼品内容
+func RedeemGift(c *gin.Context) (interface{},error) {
+	giftCode := c.PostForm("giftCode")
 	name := c.PostForm("name")
-	code := c.PostForm("giftCode")
-	if len(name) == 0 {
-		err := globalError.Param("参数为空")
-		c.JSON(err.Status,err)
-		return
+	if !verify.ParamIsNotEmpty(giftCode,name){
+		return nil,globalError.ParamError("参数不能为空",globalError.ParamIsEmpty)
 	}
-	bytes,err := service.RedeemGift(name, code)
-	if len(err.Error())!=0 {
-		c.JSON(err.Status, err)
-		return
-	} else {
-		c.JSON(http.StatusOK, gin.H{
-			"message": bytes,
-		})
-	}
+	resMap,err := handler.RedeemGift(giftCode,name)
+	return resMap,err
 
 }
 

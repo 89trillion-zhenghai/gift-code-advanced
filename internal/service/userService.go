@@ -1,121 +1,142 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"gift-code-Two/internal/globalError"
-	model "gift-code-Two/internal/model"
-	utils "gift-code-Two/internal/utils"
+	"gift-code-Two/internal/model"
+	"gift-code-Two/internal/utils"
 	"gift-code-Two/response"
 	"github.com/golang/protobuf/proto"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 	"log"
+	"strconv"
+	"time"
 )
 
-func Login(name string) (user model.FindUser, err error) {
-	var (
-		collection = model.GetMgoCol("user", "depot")
-	)
+func Login(name string) (interface{}, error) {
 	//先判断用户是否存在
-	filter := bson.M{"name": name}
-	result := model.FindUser{}
-	err = collection.FindOne(context.TODO(), filter).Decode(&result)
-	if err != nil {
-		//用户不存在，新建一个用户
-		user := model.InsertUser{
-			Name: name,
-			Depot: map[uint32]uint64{
-				uint32(1001): uint64(0),
-				uint32(1002): uint64(0),
-			},
-		}
-		collection.InsertOne(context.TODO(), user)
-		return model.FindUser{}, errors.New("新用户欢迎注册！你的通行证为：" + name)
-	} else {
-		return result, nil
+	res, exit := model.UserIsExit(name)
+	if exit {
+		return res,nil
 	}
+	//用户不存在，注册一个新用户
+	user := model.InsertUser{
+		Name: name,
+		Depot: map[uint32]uint64{
+			uint32(1001): uint64(0),
+			uint32(1002): uint64(0),
+		},
+	}
+	err := model.Register(user)
+	if err != nil {
+		return nil,err
+	}
+	return nil,globalError.Register(name)
 }
 
-func RedeemGift(name string, code string) (resByte []byte,resErr globalError.GlobalError){
-	//判断用户是否存在，不存在则新建注册一个用户
-	var (
-		collection = model.GetMgoCol("user", "depot")
-		err        error
-		uid        string
-		res        *mongo.InsertOneResult
-	)
-	filter := bson.M{"name": name}
-	result := model.FindUser{}
-	err = collection.FindOne(context.TODO(), filter).Decode(&result)
-	if err != nil {
-		//用户不存在，新建一个用户
-		user := model.InsertUser{
-			Name: name,
-			Depot: map[uint32]uint64{
-				uint32(1001): uint64(0),
-				uint32(1002): uint64(0),
-			},
-		}
-		if res, err = collection.InsertOne(context.TODO(), user); err != nil {
-			log.Fatal(err)
-		}
-		// 取出_id
-		uid = res.InsertedID.(primitive.ObjectID).Hex()
-		fmt.Println(uid)
+func RedeemGift(code string, name string) ([]byte,error){
+	//判断该用户是否存在
+	user, exit := model.UserIsExit(name)
+	if !exit {
+		return nil,globalError.UserError("用户不存在")
 	}
-	//判断礼品码是否可以兑换，需要考核题三的接口支持
-	msg := utils.SendComplexGetRequest(code, name)
-	if msg["message"] == nil {
-		//不可兑换
-		fmt.Println("不可兑换")
-		return nil,globalError.GiftNotConvertible("本礼品码不可以兑换")
+	//判断礼品码是否存在
+	gift, _ := model.GetGift(code)
+	if len(gift) == 0 {
+		return nil,globalError.GiftCodeError("礼品码有误或不存在",globalError.GiftCodeNotExist)
 	}
-	detail := msg["message"]["GiftDetail"]
-	m := make(map[string]string)
-	json.Unmarshal([]byte(detail.(string)), &m)
-	if len(m) == 0 {
-		//不可兑换
-		fmt.Println("不可兑换")
-		return nil,globalError.GiftNotConvertible("本礼品码不可以兑换")
-	} else {
-		//可兑换
-		//获取奖品内容
-		//giftDetail := msg["message"]
-		//获取用户原来的物品信息
-		err = collection.FindOne(context.TODO(), filter).Decode(&result)
-		genera := model.GeneraReward{}
-		genera.Code = int32(200)
-		genera.Msg = "领取成功"
-		genera.Changes = utils.MapToAnther(m)
-		genera.Balance = result.Depot
-		genera.Counter = utils.DepotAdd(genera.Changes, genera.Balance)
-		//给用户增加奖励，mongodb更新数据
-		collection.UpdateOne(context.TODO(), filter, bson.D{
-			{"$set", bson.D{
-				{"depot", bson.D{
-					{"1001", genera.Counter[uint32(1001)]},
-					{"1002", genera.Counter[uint32(1002)]},
-				}},
-			}},
-		})
-		gen := &response.GeneralReward{
-			Code:    genera.Code,
-			Msg:     genera.Msg,
-			Changes: genera.Changes,
-			Balance: genera.Balance,
-			Counter: genera.Counter,
-			Ext:     "扩展字段",
+	//判断礼品码是否失效
+	now := time.Now().Unix()
+	validity := gift["Validity"]
+	val, _ := strconv.Atoi(validity)
+	if int64(val) < now{
+		return nil,globalError.GiftCodeError("礼品码失效",globalError.GiftCodeExpired)
+	}
+	//获取礼品码的种类
+	giftType := gift["GiftType"]
+	switch giftType {
+	case "1":
+		//第一类礼品码：指定用户一次性消耗
+		//只需要判断领取列表是否有值，没有值就直接领取
+		flag := model.GiftIsAvailed(code)
+		if !flag {
+			return nil,globalError.GiftCodeError("礼品码已失效",globalError.GiftCodeIsInvalid)
 		}
-		bytes, err := proto.Marshal(gen)
+		//领取操作
+		res, err := receive(code, name, user, gift)
 		if err != nil {
-			log.Fatal(err)
+			return nil,err
 		}
-		return bytes,globalError.GlobalError{}
+		return res,nil
+	case "2":
+		//第二类礼品码：不指定用户限制兑换次数
+		//判断可领取次数是否大于0
+		availableTime, _ := model.GetAvailableTime(code)
+		time, _ := strconv.Atoi(gift["AvailableTimes"])
+		times,_ := strconv.Atoi(availableTime)
+		if time - times < 1 {
+			return nil,globalError.GiftCodeError("礼品已被领取光了",globalError.GiftIsOver)
+		}
+		//判断是否领取过
+		if !model.UserIsAvailed(code,name){
+			return nil,globalError.GiftCodeError("你已经领取过本礼品了",globalError.GiftCodeReceived)
+		}
+		//领取操作
+		res, err := receive(code, name, user, gift)
+		if err != nil {
+			return nil,err
+		}
+		return res,nil
+	default:
+		//第三类礼品码：不限用户不限次数兑换
+		//判断是否领取过
+		if !model.UserIsAvailed(code,name){
+			return nil,globalError.GiftCodeError("你已经领取过本礼品了",globalError.GiftCodeReceived)
+		}
+		//领取操作
+		res, err := receive(code, name, user, gift)
+		if err != nil {
+			return nil,err
+		}
+		return res,nil
 	}
-
 }
+
+//开启事务操作  redis中的写操作 1、领取次数+1 2、领取列表添加，mongodb中的写操作 1、给用户增加奖励，三步操作必须保证全部成功或者有一个失败就回退所有操作
+func receive(code string ,name string,user model.FindUser,gift map[string]string) ([]byte,error) {
+	//领取次数+1，领取列表追加
+	err := model.IncrAvailableAndAppendUser(code, name)
+	if err != nil {
+		return nil,err
+	}
+	//mongodb给用户增加奖励,用户原来的信息：user 礼包内容：gift["GiftDetail"]
+	change := make(map[string]string)
+	json.Unmarshal([]byte(gift["GiftDetail"]), &change)
+	changes := utils.MapToAnther(change)
+	balance := make(map[uint32]uint64)
+	for key := range changes {
+		balance[key] = user.Depot[key]
+	}
+	result := utils.DepotAdd(user.Depot,changes)
+	//给用户增加奖励，mongodb更新数据
+	err = model.UpdateUser(result, name)
+	if err!= nil {
+		//回滚mongodb和redis的操作
+		model.Rollback(code,user)
+		return nil,globalError.ServerError("服务器异常,请重试！")
+	}
+	genera := &response.GeneralReward{
+		Code:    int32(200),
+		Msg:     "领取成功",
+		Changes: changes,
+		Balance: balance,
+		Counter: utils.DepotAdd(changes, balance),
+		Ext:     "扩展字段",
+	}
+	bytes, err := proto.Marshal(genera)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return bytes,nil
+}
+
 

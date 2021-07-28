@@ -6,10 +6,18 @@ import (
 )
 
 const (
-	NotConvertible	   = 1001 //礼品码不可领取
-	ServerException    = 1002 //未知错误
-	MongoDBException   = 1003 //mongodb数据库异常
-		ParamIsEmpty       = 1004 //参数为空
+	GiftCodeExpired  	= 1001		//礼品码已过期
+	GiftCodeReceived 	= 1002		//该用户已经领取过礼品码了
+	GiftCodeNotExist 	= 1003		//礼品码不存在/错误
+	GiftCodeIsInvalid	= 1004		//礼品码已失效
+	GiftIsOver		 	= 1005		//礼品被领取完毕
+	ServerException    	= 1006 		//服务器异常
+	MongoDBException   	= 1007 		//mongodb数据库异常
+	RedisException		= 1008		//redis数据库异常
+	ParamIsEmpty	 	= 1009		//参数为空
+	ParamIsIllegal		= 1010		//参数不合法
+	UserNotExit			= 1011		//用户不存在
+	UserRegister		= 1012		//用户注册
 )
 
 type GlobalHandler func(c *gin.Context) (interface{}, error)
@@ -24,12 +32,16 @@ func ErrorHandler(handler GlobalHandler) gin.HandlerFunc {
 			c.JSON(globalError.Status, globalError)
 			return
 		}
-		c.JSON(http.StatusOK, data)
+		c.JSON(http.StatusOK, gin.H{
+			"status":http.StatusOK,
+			"data":data,
+			"message":"success",
+		})
 	}
 }
 
-// ExpressionError 参数异常
-func ExpressionError(message string, code int) GlobalError {
+// ParamError 参数异常
+func ParamError(message string, code int) GlobalError {
 	return GlobalError{
 		Status:  http.StatusBadRequest,
 		Code:    code,
@@ -45,28 +57,38 @@ func ServerError(message string) GlobalError {
 		Message: message,
 	}
 }
-//MongoDBError mongodb数据库异常
-func MongoDBError(message string) GlobalError {
+//DBError 数据库异常
+func DBError(message string,code int) GlobalError {
 	return GlobalError{
-		Status:  http.StatusForbidden,
-		Code:    MongoDBException,
-		Message: message,
-	}
-}
-//Param 参数为空
-func Param(message string) GlobalError {
-	return GlobalError{
-		Status:  http.StatusForbidden,
-		Code:    ParamIsEmpty,
+		Status: http.StatusInternalServerError,
+		Code: code,
 		Message: message,
 	}
 }
 
-//GiftNotConvertible 礼品不可以领取
-func GiftNotConvertible(message string) GlobalError {
+
+//GiftCodeError 礼品码异常
+func GiftCodeError(message string, code int) GlobalError {
 	return GlobalError{
-		Status:  http.StatusForbidden,
-		Code:    NotConvertible,
+		Status: http.StatusBadRequest,
+		Code: code,
 		Message: message,
+	}
+}
+//UserError 用户不存在
+func UserError(message string) GlobalError {
+	return GlobalError{
+		Status: http.StatusBadRequest,
+		Code: UserNotExit,
+		Message: message,
+	}
+}
+
+//Register 用户注册
+func Register(name string) GlobalError {
+	return GlobalError{
+		Status: http.StatusOK,
+		Code: UserRegister,
+		Message: "欢迎新用户注册，您的通信证为："+name,
 	}
 }

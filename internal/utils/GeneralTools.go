@@ -1,4 +1,4 @@
-package util
+package utils
 
 import (
 	"encoding/json"
@@ -36,7 +36,11 @@ func MapToAnther(params map[string]string) map[uint32]uint64 {
 func DepotAdd(m1 map[uint32]uint64, m2 map[uint32]uint64) map[uint32]uint64 {
 	sum := make(map[uint32]uint64)
 	for k, _ := range m1 {
-		sum[k] = m1[k] + m2[k]
+		if value,ok:=m2[k]; ok{
+			sum[k] = m1[k] + value
+		}else{
+			sum[k] = m1[k]
+		}
 	}
 	return sum
 }
